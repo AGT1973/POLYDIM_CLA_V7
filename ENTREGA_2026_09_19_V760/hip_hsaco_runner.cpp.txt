@@ -1,0 +1,180 @@
+/**
+ * POLYDIM V760 — hip_hsaco_runner.cpp
+ * AMD ROCm/HIP Backend: Zero-Copy Tensor Runner (BG-09)
+ */
+
+#include <iostream>
+#include <cstdint>
+#include <cstring>
+#include <vector>
+
+#ifdef WINDOWS_PLATFORM
+  #include <windows.h>
+  #define DYNLIB_OPEN(path)         LoadLibraryA(path)
+  #define DYNLIB_SYM(h, sym)        GetProcAddress((HMODULE)(h), sym)
+  #define DYNLIB_CLOSE(h)           FreeLibrary((HMODULE)(h))
+  #define DYNLIB_HANDLE             HMODULE
+  #define EXPORT_API                __declspec(dllexport)
+  #define CALL_CONV                 __cdecl
+#else
+  #include <dlfcn.h>
+  #define DYNLIB_OPEN(path)         dlopen(path, RTLD_NOW | RTLD_GLOBAL)
+  #define DYNLIB_SYM(h, sym)        dlsym(h, sym)
+  #define DYNLIB_CLOSE(h)           dlclose(h)
+  #define DYNLIB_HANDLE             void*
+  #define EXPORT_API                __attribute__((visibility("default")))
+  #define CALL_CONV
+#endif
+
+typedef int hipError_t;
+typedef int hipDevice_t;
+typedef void* hipCtx_t;
+typedef void* hipModule_t;
+typedef void* hipFunction_t;
+typedef void* hipStream_t;
+
+#define HIP_SUCCESS 0
+
+typedef hipError_t (*PFN_hipInit)(unsigned int flags);
+typedef hipError_t (*PFN_hipDeviceGet)(hipDevice_t* dev, int ordinal);
+typedef hipError_t (*PFN_hipModuleLoad)(hipModule_t* module, const char* fname);
+typedef hipError_t (*PFN_hipModuleUnload)(hipModule_t module);
+typedef hipError_t (*PFN_hipModuleGetFunction)(hipFunction_t* hfunc, hipModule_t hmod, const char* name);
+typedef hipError_t (*PFN_hipModuleLaunchKernel)(
+    hipFunction_t f,
+    unsigned int gridDimX, unsigned int gridDimY, unsigned int gridDimZ,
+    unsigned int blockDimX, unsigned int blockDimY, unsigned int blockDimZ,
+    unsigned int sharedMemBytes, hipStream_t stream,
+    void** kernelParams, void** extra
+);
+typedef hipError_t (*PFN_hipDeviceSynchronize)(void);
+typedef const char* (*PFN_hipGetErrorString)(hipError_t error);
+
+struct HIPDriverState {
+    DYNLIB_HANDLE hLib = nullptr;
+    bool          loaded = false;
+
+    PFN_hipInit                  hipInit_fn                  = nullptr;
+    PFN_hipDeviceGet             hipDeviceGet_fn             = nullptr;
+    PFN_hipModuleLoad            hipModuleLoad_fn            = nullptr;
+    PFN_hipModuleUnload          hipModuleUnload_fn          = nullptr;
+    PFN_hipModuleGetFunction     hipModuleGetFunction_fn     = nullptr;
+    PFN_hipModuleLaunchKernel    hipModuleLaunchKernel_fn    = nullptr;
+    PFN_hipDeviceSynchronize     hipDeviceSynchronize_fn     = nullptr;
+    PFN_hipGetErrorString        hipGetErrorString_fn        = nullptr;
+};
+
+static HIPDriverState g_hip;
+
+static bool load_hip_driver() {
+    if (g_hip.loaded) return true;
+
+    static const char* candidates[] = {
+        "libamdhip64.so",
+        "libamdhip64.so.6",
+        "libamdhip64.so.5",
+        "amdhip64.dll",
+        nullptr
+    };
+
+    for (const char** cand = candidates; *cand != nullptr; ++cand) {
+        g_hip.hLib = DYNLIB_OPEN(*cand);
+        if (g_hip.hLib) {
+            std::cerr << "[HIP Runner] Loaded: " << *cand << "\n";
+            break;
+        }
+    }
+
+    if (!g_hip.hLib) {
+        std::cerr << "[HIP Runner] FATAL: libamdhip64.so not found.\n";
+        return false;
+    }
+
+#define LOAD_SYM(name) \
+    g_hip.name##_fn = (PFN_##name)DYNLIB_SYM(g_hip.hLib, #name); \
+    if (!g_hip.name##_fn) return false;
+
+    LOAD_SYM(hipInit)
+    LOAD_SYM(hipDeviceGet)
+    LOAD_SYM(hipModuleLoad)
+    LOAD_SYM(hipModuleUnload)
+    LOAD_SYM(hipModuleGetFunction)
+    LOAD_SYM(hipModuleLaunchKernel)
+    LOAD_SYM(hipDeviceSynchronize)
+    LOAD_SYM(hipGetErrorString)
+
+#undef LOAD_SYM
+
+    g_hip.loaded = true;
+    return true;
+}
+
+#define CHECK_HIP(call)                                                         \
+    do {                                                                         \
+        hipError_t _err = (call);                                                \
+        if (_err != HIP_SUCCESS) {                                               \
+            const char* msg = g_hip.hipGetErrorString_fn                         \
+                              ? g_hip.hipGetErrorString_fn(_err) : "unknown";    \
+            std::cerr << "[HIP Runner] FATAL Error " << _err << " (" << msg     \
+                      << ") at " << __FILE__ << ":" << __LINE__ << "\n";         \
+            return;                                                              \
+        }                                                                        \
+    } while (0)
+
+extern "C" {
+
+EXPORT_API void CALL_CONV launch_triton_hsaco(
+    const char* hsaco_path,
+    const char* kernel_name,
+    uint64_t*   device_args,
+    int         num_args,
+    unsigned int gridX,  unsigned int gridY,  unsigned int gridZ,
+    unsigned int blockX, unsigned int blockY, unsigned int blockZ,
+    unsigned int sharedMemBytes
+) {
+    if (!g_hip.loaded) {
+        if (!load_hip_driver()) return;
+    }
+
+    CHECK_HIP(g_hip.hipInit_fn(0));
+
+    hipModule_t   module   = nullptr;
+    hipFunction_t kernel_fn = nullptr;
+
+    CHECK_HIP(g_hip.hipModuleLoad_fn(&module, hsaco_path));
+    CHECK_HIP(g_hip.hipModuleGetFunction_fn(&kernel_fn, module, kernel_name));
+
+    std::vector<void*> arg_ptrs(static_cast<size_t>(num_args));
+    for (int i = 0; i < num_args; ++i) {
+        arg_ptrs[i] = &device_args[i];
+    }
+
+    CHECK_HIP(g_hip.hipModuleLaunchKernel_fn(
+        kernel_fn,
+        gridX, gridY, gridZ,
+        blockX, blockY, blockZ,
+        sharedMemBytes,
+        nullptr,
+        arg_ptrs.data(),
+        nullptr
+    ));
+
+    CHECK_HIP(g_hip.hipDeviceSynchronize_fn());
+
+    if (g_hip.hipModuleUnload_fn && module) {
+        g_hip.hipModuleUnload_fn(module);
+    }
+}
+
+EXPORT_API int CALL_CONV hip_get_device_count() {
+    if (!load_hip_driver()) return 0;
+    int count = 0;
+    hipDevice_t dev;
+    for (int i = 0; i < 8; ++i) {
+        if (g_hip.hipDeviceGet_fn(&dev, i) == HIP_SUCCESS) ++count;
+        else break;
+    }
+    return count;
+}
+
+} // extern "C"

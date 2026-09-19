@@ -1,7 +1,9 @@
 fn main() {
     cc::Build::new()
         .cpp(true)
-        .file("../ENTREGA_DOCENTES_ALUMNOS_V735/kernel_cpp_v735.cpp")
+        .file("../POLYDIM_V751/src/polydim_kernel.cpp")
+        .include("../POLYDIM_V751/include")
+        .define("POLYDIM_BUILD_DLL", None)
         .flag_if_supported("/O2")
         .flag_if_supported("/openmp")
         .flag_if_supported("-O3")

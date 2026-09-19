@@ -1,0 +1,46 @@
+use std::sync::atomic::{AtomicU64, AtomicU32, Ordering};
+
+// ============================================================================
+// POLYDIM V760 — RUST TOPOLOGICAL GUARD & ACQUIRE READER
+// ============================================================================
+
+#[repr(C, align(64))]
+pub struct PMTPControl {
+    pub sequence: AtomicU64,
+    pub active_buffer: AtomicU32,
+}
+
+// BG-06: Rust Reader implementation
+#[no_mangle]
+pub extern "C" fn rust_acquire_read(
+    ctrl: &PMTPControl, 
+    observed_seq: &mut u64, 
+    safe_buffer: &mut u32
+) -> bool {
+    let seq = ctrl.sequence.load(Ordering::Acquire);
+    if seq == *observed_seq {
+        return false;
+    }
+    
+    *safe_buffer = ctrl.active_buffer.load(Ordering::Relaxed);
+    *observed_seq = seq;
+    true
+}
+
+// BG-05: Rust Secondary Guardian
+#[no_mangle]
+pub extern "C" fn validate_vector(x_ptr: *const f64, expected_dim: usize) -> i32 {
+    if x_ptr.is_null() { return -1; }
+    
+    let x = unsafe { std::slice::from_raw_parts(x_ptr, expected_dim) };
+    
+    for &v in x {
+        if !v.is_finite() {
+            return -2; // NaN or Inf
+        }
+        if v != 0.0 && v.abs() < f64::MIN_POSITIVE {
+            return -3; // Subnormal leaked!
+        }
+    }
+    0 // OK
+}

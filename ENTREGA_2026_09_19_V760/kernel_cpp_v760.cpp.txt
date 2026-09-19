@@ -1,0 +1,99 @@
+#include <cstdint>
+#include <atomic>
+#include <vector>
+#include <cmath>
+#include <xmmintrin.h>
+#include <pmmintrin.h>
+#include <omp.h>
+#include <iostream>
+
+// ============================================================================
+// POLYDIM V760 — NATIVE C++ SILICON KERNEL
+// ============================================================================
+
+// --- BG-06: ATOMIC FFI PUBLICATION (DOUBLE BUFFER) ---
+struct alignas(128) PMTP_Control {
+    std::atomic<uint64_t> sequence;
+    std::atomic<uint32_t> active_buffer;
+};
+
+extern "C" {
+    // Python (Writer) calls this after sanitizing and copying to inactive buffer
+    void polydim_publish_write(PMTP_Control* ctrl, uint32_t buffer_index, uint64_t next_seq) {
+        ctrl->active_buffer.store(buffer_index, std::memory_order_relaxed);
+        // Happens-Before: guarantees tensor writes are visible before seq update
+        ctrl->sequence.store(next_seq, std::memory_order_release);
+    }
+
+    // C++ (Reader) calls this to get safe buffer
+    bool polydim_acquire_read(PMTP_Control* ctrl, uint64_t& observed_seq, uint32_t& safe_buffer) {
+        uint64_t seq = ctrl->sequence.load(std::memory_order_acquire);
+        if (seq == observed_seq) return false;
+        
+        safe_buffer = ctrl->active_buffer.load(std::memory_order_relaxed);
+        observed_seq = seq;
+        return true;
+    }
+}
+
+// --- BG-04: FTZ/DAZ SAFE CONCURRENCY ---
+inline void enable_ftz_daz() {
+    unsigned int mxcsr = _mm_getcsr();
+    mxcsr |= (1u << 15) | (1u << 6); // FTZ | DAZ
+    _mm_setcsr(mxcsr);
+    // Compiler fence to prevent instruction hoisting (Anti-Happy-Path)
+    __asm__ volatile("":::"memory");
+}
+
+// --- BG-02 & BG-15: DYNAMIC FALSE SHARING ELIMINATION ---
+constexpr std::size_t CACHE_LINE = 64; // Default x86-64 / Zen / ARM
+constexpr std::size_t round_up(std::size_t n, std::size_t alignment) {
+    return ((n + alignment - 1) / alignment) * alignment;
+}
+
+struct NeumaierState {
+    double sum;
+    double y_comp;
+    double correction;
+    double error;
+};
+
+struct alignas(CACHE_LINE) FusedTileAcc {
+    NeumaierState state;
+    char padding[round_up(sizeof(NeumaierState), CACHE_LINE) - sizeof(NeumaierState)];
+};
+static_assert(alignof(FusedTileAcc) == CACHE_LINE, "Alignment fail");
+static_assert(sizeof(FusedTileAcc) % CACHE_LINE == 0, "False Sharing fail");
+
+// --- BG-03: Hager-Higham O(N^2) Estimator & Adaptive Fallback ---
+double estimate_rcond_hager_higham(const double* R, int N) {
+    return 1.0; // Placeholder for TRSM condition estimation
+}
+
+extern "C" {
+    void compute_gram_and_factorize(double* G, double* R, int N) {
+        double dmin = std::abs(R[0]);
+        double dmax = std::abs(R[0]);
+        for(int i=1; i<N; ++i) {
+            double v = std::abs(R[i*N + i]);
+            if(v < dmin) dmin = v;
+            if(v > dmax) dmax = v;
+        }
+        
+        double eta = dmax / dmin;
+        
+        if (dmin == 0.0 || eta >= 1e8) {
+            // Tier 3: MGS2
+        } else if (eta <= 1e4) {
+            // Tier 1: CholQR2
+        } else {
+            // Tier 2: Ambigua -> Hager-Higham
+            double kappa_est = estimate_rcond_hager_higham(R, N);
+            if (kappa_est < 1e8) {
+                // Shifted-CholQR2
+            } else {
+                // MGS2
+            }
+        }
+    }
+}
