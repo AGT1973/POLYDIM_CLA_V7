@@ -5,6 +5,7 @@
   "language": "python",
   "kernel_type": "script",
   "is_private": "true",
-  "enable_internet": "true",
-  "accelerator": "GPU"
+  "enable_gpu": "true",
+  "enable_tpu": "false",
+  "enable_internet": "true"
 }

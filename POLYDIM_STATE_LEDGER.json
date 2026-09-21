@@ -1,16 +1,16 @@
 {
   "project": "POLYDIM",
-  "active_version": "V762",
-  "ingestion_status": "COMPLETED_RULE_19_RELEASED",
-  "code_veto_rule_19": "UNLOCKED_CODE_GENERATION_ENABLED",
-  "physical_silicon_test": "PASS_5_OF_5_V762_SUITES_LIVE_EXIT_0",
-  "rule_28_redteam_status": "ALL_4_ATTACKS_SURVIVED_ZERO_ERRORS",
+  "active_version": "V764",
+  "ingestion_status": "COMPLETED",
+  "code_veto_rule_19": "UNLOCKED",
+  "physical_silicon_test": "PENDING_V764",
+  "rule_28_redteam_status": "ALL_P0_P1_CLOSED_ZERO_ERRORS",
   "dart_ffi_status": "D10M_FP64_STANDALONE_BRIDGE_READY",
-  "delivery_status": "RELEASE_V762_CERTIFIED_AND_DELIVERED",
+  "delivery_status": "IN_PROGRESS_V764",
   "master_contracts": [
     "State Contract: S = (X, F, G, nu, E, A)",
     "Operator Contract: O: S_A -> S_B with Lipschitz L_T",
-    "Publication & Reclamation Contract: 64-bit Packed Atomic PMTP Double-Buffer",
+    "Publication & Reclamation Contract: Triple-Buffer 8-bit Atomic PMTP SPSC",
     "Silicon Contract: Zero Hardcoding HardwareProbe Dynamic Discovery"
   ],
   "execution_modes": [
@@ -19,14 +19,8 @@
     "CPU: Fused 2-Pass OpenMP + Neumaier TwoSum + std::fma",
     "DART: Standalone NativeHeap FFI Bridge"
   ],
-  "delivery_dir": "E:\\POLYDIM_EINSOF\\ENTREGA_2026_09_19_V762\\",
+  "delivery_dir": "E:\\POLYDIM_EINSOF\\EPOLYDIM_EINSOFENTREGA_2026_09_20_V764\\",
+  "audit_dir": "E:\\POLYDIM_EINSOF\\EPOLYDIM_EINSOFENTREGA_2026_09_20_V764\\auditoria_externa\\",
   "persistent_reports_dir": "E:\\POLYDIM_EINSOF\\REPORTES\\",
-  "last_updated": "2026-09-19T20:29:00",
-  "nightly_mode": {
-    "status": "RUNNING_6H_LOOP",
-    "current_round": 51,
-    "total_errors": 0,
-    "last_cycle_time": "2026-09-19 20:28:40",
-    "end_target_time": "2026-09-20 02:22:00"
-  }
+  "last_updated": "2026-09-20T17:56:00"
 }

@@ -10,9 +10,11 @@ Function Write-Log($Message) {
 Write-Log "=== INICIANDO PROTOCOLO DE RESPALDO NOCTURNO (2 AM) ==="
 
 # 1. GIT PUSH PUBLICO
-Write-Log "Ejecutando Git Push en E:\POLYDIM_EINSOF..."
+Write-Log "Ejecutando Git Add, Commit y Push en E:\POLYDIM_EINSOF..."
 Set-Location -Path "E:\POLYDIM_EINSOF"
-git push origin main >> $LogFile 2>&1
+git add -A >> $LogFile 2>&1
+git commit -m "Auto-backup 2AM: SOTA V765 Vector B hardening and hounds certification ($Timestamp)" >> $LogFile 2>&1
+git push origin master:main >> $LogFile 2>&1
 
 # Definir Rutas Origen
 $SrcPolydim = "E:\POLYDIM_EINSOF"
