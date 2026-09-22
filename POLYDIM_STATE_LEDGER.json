@@ -1,26 +1,19 @@
 {
   "project": "POLYDIM",
-  "active_version": "V764",
-  "ingestion_status": "COMPLETED",
-  "code_veto_rule_19": "UNLOCKED",
-  "physical_silicon_test": "PENDING_V764",
-  "rule_28_redteam_status": "ALL_P0_P1_CLOSED_ZERO_ERRORS",
-  "dart_ffi_status": "D10M_FP64_STANDALONE_BRIDGE_READY",
-  "delivery_status": "IN_PROGRESS_V764",
-  "master_contracts": [
-    "State Contract: S = (X, F, G, nu, E, A)",
-    "Operator Contract: O: S_A -> S_B with Lipschitz L_T",
-    "Publication & Reclamation Contract: Triple-Buffer 8-bit Atomic PMTP SPSC",
-    "Silicon Contract: Zero Hardcoding HardwareProbe Dynamic Discovery"
+  "active_version": "V767",
+  "consolidated_version": "V766",
+  "ingestion_status": "COMPLETED_7_IAS_CONSENSUATED",
+  "code_veto_rule_19": "READY_FOR_PATCHES",
+  "rule_13_status": "HANDOFF_CREATED",
+  "handoff_file": "E:\\POLYDIM_EINSOF\\CONTEXTO_HISTORICO_V767_CONSENSO.md",
+  "p0_p1_tasks": [
+    "P0: Seqlock 64-bit real por slot con validacion monotónica",
+    "P0: Cortafuegos try/catch extern C con POLYDIM_ERR_ALLOC",
+    "P0: Remover __restrict__ en firmas con soporte in-place",
+    "P1: Stiefel BLAS con 3 llamadas dsyrk/dgemm sin matriz W de 82GB",
+    "P1: Ajuste teórico DPI en dossier"
   ],
-  "execution_modes": [
-    "CUDA: 2-Pass Rodrigues + CUBIN Driver API",
-    "ROCM: HIP Driver API + HSACO Binary Loader",
-    "CPU: Fused 2-Pass OpenMP + Neumaier TwoSum + std::fma",
-    "DART: Standalone NativeHeap FFI Bridge"
-  ],
-  "delivery_dir": "E:\\POLYDIM_EINSOF\\EPOLYDIM_EINSOFENTREGA_2026_09_20_V764\\",
-  "audit_dir": "E:\\POLYDIM_EINSOF\\EPOLYDIM_EINSOFENTREGA_2026_09_20_V764\\auditoria_externa\\",
-  "persistent_reports_dir": "E:\\POLYDIM_EINSOF\\REPORTES\\",
-  "last_updated": "2026-09-20T17:56:00"
+  "delivery_dir_v766": "E:\\POLYDIM_EINSOF\\ENTREGA_2026_09_21_V766\\",
+  "development_dir_v767": "E:\\POLYDIM_EINSOF\\ENTREGA_2026_09_21_V767\\",
+  "last_updated": "2026-09-21T17:48:00"
 }
