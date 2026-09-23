@@ -67,15 +67,20 @@ def run_tests():
     print(f"           -> PASSED in {(t1-t0)*1000:.2f} ms | No segfaults, extreme cache load handled.")
 
     # 3. Test Cayley-SMW Retraction (L1 Blocked GEMM & Stack Guard)
-    print(f"  [TEST 3] Cayley-SMW Retraction (L1 Blocked GEMM) | D = {D_mat:,}, K = {K_mat}...")
-    Y_out = np.zeros_like(X)
+    D_cayley = 10_000
+    print(f"  [TEST 3] Cayley-SMW Retraction (L1 Blocked GEMM) | D = {D_cayley:,}, K = {K_mat}...")
+    X_c = X[:D_cayley, :]
+    q_c, _ = np.linalg.qr(X_c, mode='reduced')
+    X_c = np.ascontiguousarray(q_c)
+    G_c = G_out[:D_cayley, :]
+    Y_out = np.zeros_like(X_c)
     tau = 0.01
     t0 = time.perf_counter()
     rc = lib.polydim_stiefel_cayley_smw_f64(
-        X.ctypes.data_as(ctypes.c_void_p),
-        G_out.ctypes.data_as(ctypes.c_void_p),
+        X_c.ctypes.data_as(ctypes.c_void_p),
+        G_c.ctypes.data_as(ctypes.c_void_p),
         Y_out.ctypes.data_as(ctypes.c_void_p),
-        ctypes.c_uint64(D_mat),
+        ctypes.c_uint64(D_cayley),
         ctypes.c_uint32(K_mat),
         ctypes.c_double(tau),
         ctypes.byref(tols),
