@@ -23,8 +23,23 @@
 > **Regla de oro:** No materializar $G_{proj}$ salvo que sea consumidor final.
 > Disiente implícitamente con Cerebras: considera la contracción robusta conceptualmente si se usa álgebra de alta intensidad y se fuerza la simetría.
 
-### 2.3 Orígenes Pendientes (DeepSeek, Qwen, Gemini)
-*(Esperando confirmación final del usuario para cerrar la Fase 0 y pasar a Fase 1: Arbitraje sobre la Cancelación Catastrófica de Cerebras vs la Validación de Kimi).*
+### 2.3 Origen: Tribunal de Sabios (Síntesis de DeepSeek/Qwen)
+**Resolución del Conflicto Cerebras vs Kimi:**
+> El Tribunal dictamina que **ambos tenían razón parcial**, y la solución SOTA requiere un diseño "Zero Trust" (Fallback Adaptativo).
+> 
+> **Sobre la Arquitectura (Victoria de Kimi):**
+> 1. Es un error garrafal haber mantenido la doble evaluación de $G_{proj}$ en el Paso 3 (líneas 1064-1087). 
+> 2. Si $G_{proj}$ solo se usa para el update Cayley ($Y_{out} = X + \alpha G_{proj} B$), **NUNCA debe materializarse**. Debe fusionarse como $Y_{out} = X + \alpha G B - \alpha X (S B)$.
+> 3. Esto destruye un cuello de botella de memoria gigantesco y permite usar BLAS-3 puro.
+>
+> **Sobre la Matemática (Victoria de Cerebras):**
+> 1. La ecuación $Q = H - S C - C^\top S + S^2$ sufre de **cancelación catastrófica severa** si el gradiente $G$ es predominantemente normal a $X$ (es decir, $G \approx XS$). En ese caso, la resta pierde todos los bits significativos.
+> 2. Simetrizar $Q = 0.5 * (Q + Q^\top)$ **no cura** la cancelación; solo enmascara la asimetría de redondeo, pudiendo dejar autovalores negativos (pérdida de semidefinitud positiva).
+>
+> **Diseño Final Aprobado (Fast-Path + Fallback):**
+> - Usar la vía rápida algebraica con BLAS-3 en FP64.
+> - Calcular un indicador de peligro: $\rho = \frac{\|Q_{fast}\|_F}{\|H\|_F + 2\|SC\|_F + \|S^2\|_F}$.
+> - Si $\rho$ es muy pequeño (ej. $< 10^3 u \max(D,K)$), o si el factorizador de Cholesky detecta pérdida de PSD, **activar el fallback lento** que calcula $G_{proj} = G - XS$ explícitamente y luego su Gram.
 
-## 3. Próximo Paso (Fase 1)
-Evaluación crítica (Red Team) de la aserción de Cerebras sobre la Cancelación Catastrófica en SMW. Si es cierto, la optimización $O(K^3)$ destruye la geometría de $S^{D-1}$ por precisión de coma flotante, refutando el "Exit Code 0" de juguete y exigiendo un rollback o algoritmo numéricamente estable.
+## 3. Fase 1: Verificación Empírica (Bulldog Mode)
+Se procederá a escribir un script C++ aislado para demostrar empíricamente la aserción de la cancelación catastrófica variando la componente normal de $G$. Una vez probado en silicio, se diseñará la V771.
