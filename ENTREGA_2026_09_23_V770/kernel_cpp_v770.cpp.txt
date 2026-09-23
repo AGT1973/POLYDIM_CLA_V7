@@ -444,32 +444,30 @@ extern "C" POLYDIM_EXPORT int32_t POLYDIM_CALL polydim_rodrigues_geodesic_f64(
         const double alpha = -vers * yu - sn * yv;
         const double beta  = -vers * yv + sn * yu;
 
-        #pragma omp parallel for num_threads(nthreads) schedule(static)
-        for (int64_t i = 0; i < static_cast<int64_t>(D); ++i) {
-            const double update = alpha * u[i] + beta * v[i];
-            double s, e;
-            two_sum(y[i], update, s, e);
-            y_out[i] = s + e;
+        NeumaierPad a_oo[256];
+        #pragma omp parallel num_threads(nthreads)
+        {
+            set_fp_mode();
+            const int tid = omp_get_thread_num();
+            Neumaier l;
+            #pragma omp for schedule(static)
+            for (int64_t i = 0; i < static_cast<int64_t>(D); ++i) {
+                const double update = alpha * u[i] + beta * v[i];
+                double s, e;
+                two_sum(y[i], update, s, e);
+                const double yo = s + e;
+                y_out[i] = yo;
+                l.add(yo * yo);
+            }
+            a_oo[tid] = l;
         }
 
         /* Verificación a posteriori de la norma en la esfera */
-        {
-            NeumaierPad a_oo[256];
-            #pragma omp parallel num_threads(nthreads)
-            {
-                set_fp_mode();
-                const int tid = omp_get_thread_num();
-                Neumaier l;
-                #pragma omp for schedule(static)
-                for (int64_t i = 0; i < static_cast<int64_t>(D); ++i) l.add(y_out[i] * y_out[i]);
-                a_oo[tid] = l;
-            }
-            Neumaier t_oo;
-            for (int t = 0; t < nthreads; ++t) t_oo.merge(a_oo[t]);
-            const double out_err = std::abs(std::sqrt(t_oo.total()) - 1.0);
-            if (report) report->out_norm_err = out_err;
-            if (out_err > tol.point_norm) return POLYDIM_ERR_DEGENERATE_NORM;
-        }
+        Neumaier t_oo;
+        for (int t = 0; t < nthreads; ++t) t_oo.merge(a_oo[t]);
+        const double out_err = std::abs(std::sqrt(t_oo.total()) - 1.0);
+        if (report) report->out_norm_err = out_err;
+        if (out_err > tol.point_norm) return POLYDIM_ERR_DEGENERATE_NORM;
         return POLYDIM_SUCCESS;
     }
     catch (const std::bad_alloc&) {
@@ -501,20 +499,18 @@ extern "C" POLYDIM_EXPORT int32_t POLYDIM_CALL polydim_project_sphere_f64(
         NeumaierPad acc[256];
         int bad = 0;
 
-        #pragma omp parallel num_threads(nthreads) reduction(|:bad)
+        #pragma omp parallel num_threads(nthreads)
         {
             set_fp_mode();
             const int tid = omp_get_thread_num();
             Neumaier l;
-            #pragma omp for schedule(static)
-            for (int64_t i = 0; i < static_cast<int64_t>(D); ++i) {
-                const double yi = y[i];
-                if (!std::isfinite(yi)) { bad = 1; continue; }
-                l.add(yi * yi);
-            }
+            size_t chunk = D / static_cast<size_t>(nthreads);
+            size_t rem = D % static_cast<size_t>(nthreads);
+            size_t start = static_cast<size_t>(tid) * chunk + std::min(static_cast<size_t>(tid), rem);
+            size_t len = chunk + (static_cast<size_t>(tid) < rem ? 1 : 0);
+            l.add_sqr_block(y + start, len);
             acc[tid] = l;
         }
-        if (bad) return POLYDIM_ERR_NAN_OR_INF;
 
         Neumaier t;
         for (int i = 0; i < nthreads; ++i) t.merge(acc[i]);
@@ -544,10 +540,11 @@ static double polydim_cdot(const double* a, const double* b, uint64_t D, int nth
         set_fp_mode();
         const int tid = omp_get_thread_num();
         Neumaier l;
-        #pragma omp for schedule(static)
-        for (int64_t i = 0; i < static_cast<int64_t>(D); ++i) {
-            l.add(a[i] * b[i]);
-        }
+        size_t chunk = D / static_cast<size_t>(nthreads);
+        size_t rem = D % static_cast<size_t>(nthreads);
+        size_t start = static_cast<size_t>(tid) * chunk + std::min(static_cast<size_t>(tid), rem);
+        size_t len = chunk + (static_cast<size_t>(tid) < rem ? 1 : 0);
+        l.add_dot_block(a + start, b + start, len);
         acc[tid] = l;
     }
     Neumaier t;
@@ -944,51 +941,41 @@ extern "C" POLYDIM_EXPORT int32_t POLYDIM_CALL polydim_stiefel_cayley_smw_f64(
             }
         }
 
-        for (uint32_t r = 0; r < K; ++r)
+        double* GtG_proj = polydim::detail::tls_ws().arena_gp.get(KK);
+        for (uint32_t r = 0; r < K; ++r) {
+            for (uint32_t c = 0; c < K; ++c) {
+                double term1 = 0.0, term2 = 0.0, term3 = 0.0;
+                for (uint32_t q = 0; q < K; ++q) {
+                    term1 -= Sym[r * K + q] * XtG(q, c);
+                    term2 -= XtG(q, r) * Sym[q * K + c];
+                    double sx = 0.0;
+                    for (uint32_t p = 0; p < K; ++p) {
+                        sx += Sym[r * K + p] * XtX(p, q);
+                    }
+                    term3 += sx * Sym[q * K + c];
+                }
+                GtG_proj[r * K + c] = GtG(r, c) + term1 + term2 + term3;
+            }
+        }
+
+        for (uint32_t r = 0; r < K; ++r) {
             for (uint32_t c = 0; c < K; ++c) {
                 double xtgp = XtG(r, c);
-                for (uint32_t q = 0; q < K; ++q)
+                for (uint32_t q = 0; q < K; ++q) {
                     xtgp -= XtX(r, q) * Sym[q * K + c];
+                }
                 S[static_cast<size_t>(r) * K2 + (K + c)] = xtgp;
                 S[static_cast<size_t>(K + c) * K2 + r] = xtgp;
             }
+        }
 
-        double* arena_gp = polydim::detail::tls_ws().arena_gp.get(static_cast<size_t>(nthreads) * KK);
-        std::fill(arena_gp, arena_gp + static_cast<size_t>(nthreads) * KK, 0.0);
-        #pragma omp parallel num_threads(nthreads)
-        {
-            set_fp_mode();
-            double row_gp[POLYDIM_MAX_K];
-            double* L = arena_gp + static_cast<size_t>(omp_get_thread_num()) * KK;
-            #pragma omp for schedule(static)
-            for (int64_t i = 0; i < static_cast<int64_t>(D); ++i) {
-                const double* xi = X + static_cast<size_t>(i) * K;
-                const double* gi = G + static_cast<size_t>(i) * K;
-                for (uint32_t c = 0; c < K; ++c) {
-                    row_gp[c] = gi[c];
-                }
-                for (uint32_t q = 0; q < K; ++q) {
-                    const double xq = xi[q];
-                    const double* Sq = Sym + static_cast<size_t>(q) * K;
-                    for (uint32_t c = 0; c < K; ++c) {
-                        row_gp[c] -= xq * Sq[c];
-                    }
-                }
-                for (uint32_t r = 0; r < K; ++r) {
-                    const double gr = row_gp[r];
-                    double* Lr = L + static_cast<size_t>(r) * K;
-                    for (uint32_t c = r; c < K; ++c) Lr[c] += gr * row_gp[c];
-                }
+        for (uint32_t r = 0; r < K; ++r) {
+            for (uint32_t c = 0; c < K; ++c) {
+                double val = GtG_proj[r * K + c];
+                S[static_cast<size_t>(K + r) * K2 + (K + c)] = val;
+                S[static_cast<size_t>(K + c) * K2 + (K + r)] = val;
             }
         }
-        for (uint32_t r = 0; r < K; ++r)
-            for (uint32_t c = r; c < K; ++c) {
-                double s = 0.0;
-                for (int t = 0; t < nthreads; ++t)
-                    s += arena_gp[static_cast<size_t>(t) * KK + r * K + c];
-                S[static_cast<size_t>(K + r) * K2 + (K + c)] = s;
-                S[static_cast<size_t>(K + c) * K2 + (K + r)] = s;
-            }
 
         double* M = polydim::detail::tls_ws().M.get(KK2);
         double* Z = polydim::detail::tls_ws().Z.get(static_cast<size_t>(K2) * K);
