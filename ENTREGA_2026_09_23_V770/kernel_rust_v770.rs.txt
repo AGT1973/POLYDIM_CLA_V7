@@ -1,10 +1,104 @@
 // ============================================================================
-// POLYDIM V762 — NATIVE RUST TOPOLOGICAL GUARD & INVARIANT ENGINE
+// POLYDIM V769 — NATIVE RUST TOPOLOGICAL GUARD & INVARIANT ENGINE
 // Catch-Unwind Protected FFI | Betti-1 Graph Topology | Higham Bounds on S^(D-1)
 // ============================================================================
 
 use std::panic::catch_unwind;
 use std::slice;
+use std::mem::MaybeUninit;
+use std::cell::RefCell;
+
+pub struct BettiScratch {
+    parent: Vec<MaybeUninit<usize>>,
+    rank: Vec<MaybeUninit<u8>>,
+    stamp: Vec<u32>,
+    touched: Vec<usize>,
+    generation: u32,
+}
+
+impl BettiScratch {
+    pub fn new() -> Self {
+        Self {
+            parent: Vec::new(),
+            rank: Vec::new(),
+            stamp: Vec::new(),
+            touched: Vec::new(),
+            generation: 0,
+        }
+    }
+
+    pub fn begin(&mut self, num_vertices: usize) {
+        if num_vertices > self.parent.len() {
+            let capacity = num_vertices.next_power_of_two();
+            let mut new_parent = Vec::with_capacity(capacity);
+            let mut new_rank = Vec::with_capacity(capacity);
+            unsafe {
+                new_parent.set_len(capacity);
+                new_rank.set_len(capacity);
+            }
+            self.parent = new_parent;
+            self.rank = new_rank;
+            self.stamp = vec![0; capacity];
+            self.touched = Vec::with_capacity(capacity);
+        }
+
+        self.generation = self.generation.wrapping_add(1);
+        if self.generation == 0 {
+            self.stamp[..num_vertices].fill(0);
+            self.generation = 1;
+        }
+        self.touched.clear();
+    }
+
+    #[inline]
+    fn activate(&mut self, v: usize) {
+        if self.stamp[v] != self.generation {
+            self.stamp[v] = self.generation;
+            self.parent[v].write(v);
+            self.rank[v].write(0);
+            self.touched.push(v);
+        }
+    }
+
+    #[inline]
+    fn find(&mut self, mut x: usize) -> usize {
+        let mut root = x;
+        while root != unsafe { self.parent[root].assume_init_read() } {
+            root = unsafe { self.parent[root].assume_init_read() };
+        }
+        while x != root {
+            let next = unsafe { self.parent[x].assume_init_read() };
+            self.parent[x].write(root);
+            x = next;
+        }
+        root
+    }
+
+    #[inline]
+    fn union(&mut self, a: usize, b: usize, comps: &mut u64) -> bool {
+        self.activate(a);
+        self.activate(b);
+        let mut ra = self.find(a);
+        let mut rb = self.find(b);
+        if ra == rb { return false; }
+        
+        let rank_a = unsafe { self.rank[ra].assume_init_read() };
+        let rank_b = unsafe { self.rank[rb].assume_init_read() };
+        if rank_a < rank_b {
+            std::mem::swap(&mut ra, &mut rb);
+        }
+        self.parent[rb].write(ra);
+        if rank_a == rank_b {
+            self.rank[ra].write(rank_a + 1);
+        }
+        *comps -= 1;
+        true
+    }
+}
+
+thread_local! {
+    static SCRATCH: RefCell<BettiScratch> = RefCell::new(BettiScratch::new());
+}
 
 #[repr(C)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -124,6 +218,10 @@ pub unsafe extern "C" fn polydim_rust_betti1_guard(
         if num_vertices == 0 {
             *out = PolydimBettiResult { betti0: 0, betti1: 0 };
             return PolydimRustStatus::Success;
+        }
+
+        if num_vertices > u32::MAX as usize {
+            return PolydimRustStatus::ErrBufferOverflow;
         }
 
         let edges_slice = slice::from_raw_parts(edges, num_edges);

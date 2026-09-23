@@ -26,6 +26,9 @@ bin/
 
 # Logs y scratch de prueba
 *.log
+.cron_log.txt
+scratch/
 scratch_*.py
 *.mp4
 *.pptx
+

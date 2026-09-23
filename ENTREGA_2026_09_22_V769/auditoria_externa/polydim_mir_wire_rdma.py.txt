@@ -58,12 +58,11 @@ class MirWireRdmaEndpoint:
                     continue
                     
                 magic, imm_data, tensor_bytes = struct.unpack(HEADER_STRUCT, raw_header)
-                if magic != MAGIC_RDMA:
+                if magic != MAGIC_RDMA or tensor_bytes % 8 != 0 or tensor_bytes > (1024 * 1024 * 1024):
                     conn.close()
                     continue
                     
                 # Zero-Copy buffer allocation (receiving directly into pre-pinned numpy array)
-                d_count = tensor_bytes // 8  # FP64
                 tensor_buf = bytearray(tensor_bytes)
                 view = memoryview(tensor_buf)
                 
@@ -74,6 +73,11 @@ class MirWireRdmaEndpoint:
                         break
                     bytes_received += n
                     
+                if bytes_received < tensor_bytes:
+                    # Truncated payload rejected
+                    conn.close()
+                    continue
+
                 # Reconstruct tensor without text/json parsing
                 tensor = np.frombuffer(tensor_buf, dtype=np.float64)
                 self.received_tensors.append((imm_data, tensor))

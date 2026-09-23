@@ -1,5 +1,5 @@
 // ============================================================================
-// POLYDIM V762 — NATIVE RUST TOPOLOGICAL GUARD & INVARIANT ENGINE
+// POLYDIM V769 — NATIVE RUST TOPOLOGICAL GUARD & INVARIANT ENGINE
 // Catch-Unwind Protected FFI | Betti-1 Graph Topology | Higham Bounds on S^(D-1)
 // ============================================================================
 
@@ -124,6 +124,10 @@ pub unsafe extern "C" fn polydim_rust_betti1_guard(
         if num_vertices == 0 {
             *out = PolydimBettiResult { betti0: 0, betti1: 0 };
             return PolydimRustStatus::Success;
+        }
+
+        if num_vertices > u32::MAX as usize {
+            return PolydimRustStatus::ErrBufferOverflow;
         }
 
         let edges_slice = slice::from_raw_parts(edges, num_edges);

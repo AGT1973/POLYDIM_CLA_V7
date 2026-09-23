@@ -1,5 +1,5 @@
 /* ============================================================================
- * POLYDIM V768 — KERNEL INDUSTRIAL DE PRODUCCIÓN (SOTA 2026)
+ * POLYDIM V769 — KERNEL INDUSTRIAL DE PRODUCCIÓN (SOTA 2026)
  *
  * Cierra todos los hallazgos consensuados por el Tribunal de 7 IAs:
  *   - F-01: PMTP Seqlock real por ranura con contador monotónico atómico uint64_t seq.
@@ -180,7 +180,7 @@ extern "C" POLYDIM_EXPORT const char* POLYDIM_CALL polydim_status_string(int32_t
 }
 
 extern "C" POLYDIM_EXPORT const char* POLYDIM_CALL polydim_build_info(void) {
-    return "POLYDIM V768"
+    return "POLYDIM V769"
 #if POLYDIM_ENABLE_FTZ
            " | FTZ/DAZ=ON (NO conforme IEEE-754)"
 #else
@@ -225,6 +225,11 @@ extern "C" POLYDIM_EXPORT int32_t POLYDIM_CALL polydim_rodrigues_geodesic_f64(
             return POLYDIM_ERR_ALIASED_BUFFERS;
 
         const PolydimTolerances tol = tol_in ? *tol_in : polydim_default_tolerances(D);
+        if (!std::isfinite(tol.point_norm) || tol.point_norm < 0.0 ||
+            !std::isfinite(tol.basis_ortho) || tol.basis_ortho < 0.0 ||
+            !std::isfinite(tol.gram_ortho) || tol.gram_ortho < 0.0 ||
+            !std::isfinite(tol.pivot_rel) || tol.pivot_rel < 0.0)
+            return POLYDIM_ERR_INVALID_SCALAR;
 
         set_fp_mode();
         const int nthreads = clamp_threads(omp_get_max_threads());
@@ -344,6 +349,12 @@ extern "C" POLYDIM_EXPORT int32_t POLYDIM_CALL polydim_project_sphere_f64(
         polydim_report_init(report);
         if (!y || !y_out) return POLYDIM_ERR_NULL_POINTER;
         if (D == 0)       return POLYDIM_ERR_INVALID_DIMENSION;
+        if (D > (SIZE_MAX / sizeof(double))) return POLYDIM_ERR_INVALID_DIMENSION;
+
+        const size_t bytes = static_cast<size_t>(D) * sizeof(double);
+        if (y_out != y && overlaps(y_out, y, bytes))
+            return POLYDIM_ERR_ALIASED_BUFFERS;
+
         set_fp_mode();
         const int nthreads = clamp_threads(omp_get_max_threads());
         std::vector<Neumaier> acc(nthreads);
@@ -452,12 +463,24 @@ extern "C" POLYDIM_EXPORT int32_t POLYDIM_CALL polydim_project_tangent_stiefel_f
         if (!X || !G || !G_out) return POLYDIM_ERR_NULL_POINTER;
         if (D == 0 || K == 0)   return POLYDIM_ERR_INVALID_DIMENSION;
         if (K > POLYDIM_MAX_K)  return POLYDIM_ERR_BUFFER_OVERFLOW;
+        if (static_cast<uint64_t>(K) > D) return POLYDIM_ERR_INVALID_DIMENSION;
+
+        const size_t bytesDK = static_cast<size_t>(D) * static_cast<size_t>(K) * sizeof(double);
+        if (overlaps(G_out, X, bytesDK)) return POLYDIM_ERR_ALIASED_BUFFERS;
+        if (G_out != G && overlaps(G_out, G, bytesDK)) return POLYDIM_ERR_ALIASED_BUFFERS;
+
         set_fp_mode();
         const uint32_t KK = K * K;
-        const int nthreads = clamp_threads(omp_get_max_threads());
+        int nthreads = clamp_threads(omp_get_max_threads());
+        while (nthreads > 1 &&
+               static_cast<uint64_t>(nthreads) * KK * sizeof(double) > POLYDIM_GRAM_ARENA_BUDGET_BYTES)
+            nthreads /= 2;
+
         std::vector<double> XtG(KK, 0.0);
         std::vector<double> arena(static_cast<size_t>(nthreads) * KK, 0.0);
-        #pragma omp parallel num_threads(nthreads)
+        int bad_value = 0;
+
+        #pragma omp parallel num_threads(nthreads) reduction(|:bad_value)
         {
             set_fp_mode();
             double* L = arena.data() + static_cast<size_t>(omp_get_thread_num()) * KK;
@@ -465,6 +488,9 @@ extern "C" POLYDIM_EXPORT int32_t POLYDIM_CALL polydim_project_tangent_stiefel_f
             for (int64_t i = 0; i < static_cast<int64_t>(D); ++i) {
                 const double* xi = X + static_cast<size_t>(i) * K;
                 const double* gi = G + static_cast<size_t>(i) * K;
+                for (uint32_t k = 0; k < K; ++k) {
+                    if (!std::isfinite(xi[k]) || !std::isfinite(gi[k])) { bad_value = 1; }
+                }
                 for (uint32_t r = 0; r < K; ++r) {
                     const double xr = xi[r];
                     double* Lr = L + static_cast<size_t>(r) * K;
@@ -472,6 +498,8 @@ extern "C" POLYDIM_EXPORT int32_t POLYDIM_CALL polydim_project_tangent_stiefel_f
                 }
             }
         }
+        if (bad_value) return POLYDIM_ERR_NAN_OR_INF;
+
         #pragma omp parallel for num_threads(nthreads) schedule(static)
         for (int64_t j = 0; j < static_cast<int64_t>(KK); ++j) {
             double s = 0.0;
@@ -526,7 +554,7 @@ extern "C" POLYDIM_EXPORT int32_t POLYDIM_CALL polydim_stiefel_cayley_smw_f64(
         if (!require_finite(tau)) return POLYDIM_ERR_INVALID_SCALAR;
 
         const size_t bytes = static_cast<size_t>(D) * static_cast<size_t>(K) * sizeof(double);
-        if (overlaps(Y_out, X, bytes) || overlaps(Y_out, G, bytes))
+        if (overlaps(Y_out, X, bytes) || overlaps(Y_out, G, bytes) || overlaps(X, G, bytes))
             return POLYDIM_ERR_ALIASED_BUFFERS;
 
         const PolydimTolerances tol = tol_in ? *tol_in : polydim_default_tolerances(D);
@@ -722,7 +750,7 @@ extern "C" POLYDIM_EXPORT int32_t POLYDIM_CALL polydim_stiefel_cayley_smw_f64(
         }
         for (uint32_t r = 0; r < K2; ++r)
             for (uint32_t c = 0; c < K; ++c)
-                Z[static_cast<size_t>(r) * K + c] = (r < K) ? XtX(r, c) : -XtG(c, r - K);
+                Z[static_cast<size_t>(r) * K + c] = (r < K) ? XtX(r, c) : 0.0;
 
         const double pivot_thr = tol.pivot_rel * m_inf * static_cast<double>(K2);
         if (report) report->pivot_threshold = pivot_thr;
@@ -821,6 +849,12 @@ extern "C" POLYDIM_EXPORT int32_t POLYDIM_CALL polydim_stiefel_cayley_smw_f64(
             }
         }
 
+        /* Re-ortogonalización streaming con CholQR2 para garantizar el axioma de retracción y preservación isométrica exacta */
+        {
+            int32_t rc_qr = polydim_cholqr2_f64(Y_out, D, K);
+            if (rc_qr != POLYDIM_SUCCESS) return rc_qr;
+        }
+
         {
             const uint32_t KK = K * K;
             std::vector<double> arena(static_cast<size_t>(nthreads) * KK, 0.0);
@@ -860,7 +894,7 @@ extern "C" POLYDIM_EXPORT int32_t POLYDIM_CALL polydim_stiefel_cayley_smw_f64(
 }
 
 /* ==========================================================================
- * F-01: PMTP V768 SEQLOCK REAL POR RANURA (64-BIT MONOTONIC COUNTER)
+ * F-01: PMTP V769 SEQLOCK REAL POR RANURA (64-BIT MONOTONIC COUNTER)
  * Cero inanición estructural, libre de ABA, soporte multi-lector concurrente.
  * ========================================================================*/
 struct alignas(64) PMTP_SlotHeader {
@@ -907,7 +941,13 @@ static void pmtp2_unlock(PMTP_Control* c) {
 
 extern "C" POLYDIM_EXPORT uint64_t POLYDIM_CALL polydim_pmtp_sizeof(uint32_t num_slots, uint64_t payload_bytes) {
     try { 
-        return sizeof(PMTP_Control) + num_slots * sizeof(PMTP_SlotHeader) + num_slots * payload_bytes; 
+        if (num_slots < 2 || num_slots > 64) return 0;
+        if (payload_bytes == 0) return 0;
+        const uint64_t headers_size = static_cast<uint64_t>(num_slots) * sizeof(PMTP_SlotHeader);
+        if (payload_bytes > (UINT64_MAX - sizeof(PMTP_Control) - headers_size) / num_slots) {
+            return 0; // F-010: Overflow guard
+        }
+        return sizeof(PMTP_Control) + headers_size + static_cast<uint64_t>(num_slots) * payload_bytes; 
     } catch (...) { return 0; }
 }
 
@@ -918,15 +958,28 @@ extern "C" POLYDIM_EXPORT uint64_t POLYDIM_CALL polydim_pmtp_alignof(void) {
 extern "C" POLYDIM_EXPORT int32_t POLYDIM_CALL polydim_pmtp_init(PMTP_Control* c, uint32_t num_slots, uint64_t payload_bytes) {
     try {
         if (!c) return -1;
+        if ((reinterpret_cast<uintptr_t>(c) & 63u) != 0) return -11; // F-008: 64-byte alignment mandatory
         if (num_slots < 2 || num_slots > 64) return -2;
         if (payload_bytes == 0) return -2;
+        uint64_t sz = polydim_pmtp_sizeof(num_slots, payload_bytes);
+        if (sz == 0) return -2;
         
-        std::memset(c, 0, polydim_pmtp_sizeof(num_slots, payload_bytes));
+        std::memset(reinterpret_cast<void*>(c), 0, static_cast<size_t>(sz));
         c->magic = 0x504D5432u;
         c->num_slots = num_slots;
         c->payload_bytes = payload_bytes;
         return 0;
     } catch (...) { return -1; }
+}
+
+extern "C" POLYDIM_EXPORT uint64_t POLYDIM_CALL polydim_pmtp_payload_offset(PMTP_Control* c, uint32_t slot) {
+    if (!c || slot >= c->num_slots) return 0;
+    return sizeof(PMTP_Control) + static_cast<uint64_t>(c->num_slots) * sizeof(PMTP_SlotHeader) + static_cast<uint64_t>(slot) * c->payload_bytes;
+}
+
+extern "C" POLYDIM_EXPORT void* POLYDIM_CALL polydim_pmtp_payload_ptr(PMTP_Control* c, uint32_t slot) {
+    if (!c || slot >= c->num_slots) return nullptr;
+    return reinterpret_cast<char*>(c) + polydim_pmtp_payload_offset(c, slot);
 }
 
 extern "C" POLYDIM_EXPORT int32_t POLYDIM_CALL polydim_pmtp_write_begin(PMTP_Control* c, uint32_t* slot, uint64_t* ver) {
@@ -947,7 +1000,11 @@ extern "C" POLYDIM_EXPORT int32_t POLYDIM_CALL polydim_pmtp_write_begin(PMTP_Con
 
 extern "C" POLYDIM_EXPORT void POLYDIM_CALL polydim_pmtp_write_commit(PMTP_Control* c, uint32_t slot, uint64_t ver) {
     try {
-        if (!c || slot >= c->num_slots) return;
+        if (!c) return;
+        if (slot >= c->num_slots) {
+            pmtp2_unlock(c); // F-011: unlock on invalid slot to prevent permanent deadlock
+            return;
+        }
         
         PMTP_SlotHeader* hdr = pmtp2_hdr_of(c, slot);
         uint64_t new_ver = ver + 1; // even for unlocked
@@ -962,10 +1019,12 @@ extern "C" POLYDIM_EXPORT void POLYDIM_CALL polydim_pmtp_write_commit(PMTP_Contr
 
 extern "C" POLYDIM_EXPORT void POLYDIM_CALL polydim_pmtp_write_abort(PMTP_Control* c, uint32_t slot, uint64_t ver) {
     try {
-        if (!c || slot >= c->num_slots) return;
-        PMTP_SlotHeader* hdr = pmtp2_hdr_of(c, slot);
-        hdr->seq.store(ver + 1, std::memory_order_release); // unlock without updating pub_seq
-        pmtp2_unlock(c);
+        if (!c) return;
+        if (slot < c->num_slots) {
+            PMTP_SlotHeader* hdr = pmtp2_hdr_of(c, slot);
+            hdr->seq.store(ver + 1, std::memory_order_release); // unlock without updating pub_seq
+        }
+        pmtp2_unlock(c); // F-011: always unlock to prevent permanent deadlock
     } catch (...) {}
 }
 
@@ -1041,6 +1100,40 @@ extern "C" POLYDIM_EXPORT int32_t POLYDIM_CALL polydim_selftest_all(void) {
         double y_bad[4] = {1.0 + 1e-6, 0.0, 0.0, 0.0};
         if (polydim_rodrigues_geodesic_f64(y_bad, u, v, o, 0.3, 4, nullptr, nullptr)
             != POLYDIM_ERR_POINT_OFF_MANIFOLD) return POLYDIM_ERR_NUMERICAL_INSTABILITY;
+
+        // --- Stiefel & Retraction Axiom Self-Test ---
+        const uint64_t D_test = 8;
+        const uint32_t K_test = 2;
+        std::vector<double> X_st(D_test * K_test, 0.0);
+        X_st[0 * K_test + 0] = 1.0; // row 0, col 0
+        X_st[1 * K_test + 1] = 1.0; // row 1, col 1
+        
+        std::vector<double> G_st(D_test * K_test, 0.0);
+        G_st[0 * K_test + 1] = 0.5;
+        G_st[1 * K_test + 0] = -0.5;
+        G_st[2 * K_test + 0] = 0.3;
+        G_st[3 * K_test + 1] = 0.4;
+        
+        std::vector<double> G_proj(D_test * K_test, 0.0);
+        rc = polydim_project_tangent_stiefel_f64(X_st.data(), G_st.data(), G_proj.data(), D_test, K_test);
+        if (rc != POLYDIM_SUCCESS) return rc;
+
+        // Test finite-difference retraction velocity
+        const double tau = 1e-7;
+        std::vector<double> Y1(D_test * K_test, 0.0), Y2(D_test * K_test, 0.0);
+        rc = polydim_stiefel_cayley_smw_f64(X_st.data(), G_proj.data(), Y1.data(), D_test, K_test, tau, nullptr, nullptr);
+        if (rc != POLYDIM_SUCCESS) return rc;
+
+        rc = polydim_stiefel_cayley_smw_f64(X_st.data(), G_proj.data(), Y2.data(), D_test, K_test, 2.0 * tau, nullptr, nullptr);
+        if (rc != POLYDIM_SUCCESS) return rc;
+
+        double max_vel_err = 0.0;
+        for (size_t i = 0; i < D_test * K_test; ++i) {
+            double vel = (Y2[i] - Y1[i]) / tau;
+            double err = std::abs(vel - G_proj[i]);
+            if (err > max_vel_err) max_vel_err = err;
+        }
+        if (max_vel_err > 1e-4) return POLYDIM_ERR_NUMERICAL_INSTABILITY;
 
         return POLYDIM_SUCCESS;
     } catch (...) {
