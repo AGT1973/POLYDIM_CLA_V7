@@ -1,19 +1,21 @@
 {
   "project": "POLYDIM",
-  "active_version": "V767",
-  "consolidated_version": "V766",
-  "ingestion_status": "COMPLETED_7_IAS_CONSENSUATED",
-  "code_veto_rule_19": "READY_FOR_PATCHES",
-  "rule_13_status": "HANDOFF_CREATED",
-  "handoff_file": "E:\\POLYDIM_EINSOF\\CONTEXTO_HISTORICO_V767_CONSENSO.md",
+  "active_version": "V773",
+  "consolidated_version": "V773",
+  "ingestion_status": "SHIFTED_CHOLQR_SPSC_ALLOCATOR_FRECHET_BETTI_CERTIFIED",
+  "code_veto_rule_19": "RELEASED_PASSED_7_TESTS",
+  "rule_13_status": "READY_FOR_DEPLOYMENT",
+  "test_suite_status": "7_OF_7_PASS_EXIT_CODE_0",
   "p0_p1_tasks": [
-    "P0: Seqlock 64-bit real por slot con validacion monotónica",
-    "P0: Cortafuegos try/catch extern C con POLYDIM_ERR_ALLOC",
-    "P0: Remover __restrict__ en firmas con soporte in-place",
-    "P1: Stiefel BLAS con 3 llamadas dsyrk/dgemm sin matriz W de 82GB",
-    "P1: Ajuste teórico DPI en dossier"
+    "P0: Monolithic C++ Stiefel optimization with Shifted CholQR2 [CLOSED]",
+    "P0: Non-Temporal streaming store copy (SSE2 universal) [CLOSED]",
+    "P0: SPSC Wait-Free Telemetry Ring Buffer (128B cache isolation) [CLOSED]",
+    "P0: Strict Allocator Pairing & PolydimHandle refcounting [CLOSED]",
+    "P0: Rust Iterative DSU (V>=10^7, zero stack overflow) & Dual Betti guard [CLOSED]",
+    "P0: Rust Swarm Fréchet-Betti BFT Consensus Filter [CLOSED]",
+    "P1: Discrete Clifford+T quantum synthesis & structured LSM [CLOSED]"
   ],
-  "delivery_dir_v766": "E:\\POLYDIM_EINSOF\\ENTREGA_2026_09_21_V766\\",
-  "development_dir_v767": "E:\\POLYDIM_EINSOF\\ENTREGA_2026_09_21_V767\\",
-  "last_updated": "2026-09-21T17:48:00"
+  "delivery_dir_v772": "E:\\POLYDIM_EINSOF\\ENTREGA_2026_09_23_V772\\",
+  "delivery_dir_v773": "E:\\POLYDIM_EINSOF\\ENTREGA_2026_09_23_V773\\",
+  "last_updated": "2026-09-23T22:02:00"
 }
